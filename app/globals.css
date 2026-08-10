@@ -1,0 +1,155 @@
+@import "tailwindcss";
+
+@source "../app";
+@source "../components";
+
+/* ==========================================================================
+   مُدرِك — رموز التصميم (Design tokens)
+   ورقي دافئ + حبري. البرتقالي لون إشارة، لا لون زينة.
+   ========================================================================== */
+
+@theme {
+  /* --- الحبر --------------------------------------------------------- */
+  --color-ink: #101e2b;
+  --color-ink-soft: #1d2f40; /* حالة hover للحبر فقط */
+  --color-dark: #0a141d;
+  --color-dark-line: #1b2937;
+
+  /* --- الورق --------------------------------------------------------- */
+  --color-surface: #faf7f2; /* خلفية الصفحة */
+  --color-paper: #fffdf9; /* سطح البطاقة — أفتح من الخلفية، وليس أبيض نقيًا */
+
+  /* --- الخطوط والحدود ------------------------------------------------ */
+  --color-line: #e8e0d6;
+  --color-line-strong: #dbd0c0;
+
+  /* --- النص الثانوي --------------------------------------------------- */
+  --color-muted: #6b7c8c;
+
+  /* --- لون الإشارة ----------------------------------------------------
+     يُستخدم حصريًا لتعليم فجوة أو نقطة ضعف. ليس لونًا أساسيًا ولا زينة. */
+  --color-accent: #f0722c;
+  --color-accent-wash: #fbe9dd;
+
+  /* --- الخطر ----------------------------------------------------------
+     امتداد مضاف للنظام: الإجراءات المتلفة تحتاج لونًا خاصًا بها، ولا يصح
+     استعارة لون الإشارة لها. طوب محروق دافئ، من عائلة الحبر لا من البرتقالي. */
+  --color-danger: #a32e1c;
+  --color-danger-deep: #8b2617; /* حالة hover */
+  --color-danger-wash: #f6e6e2;
+
+  /* --- الشكل ---------------------------------------------------------- */
+  --radius-card: 12px; /* الزاوية الوحيدة في النظام */
+
+  /* --- الظل الوحيد ---------------------------------------------------- */
+  --shadow-lift: 0 14px 30px -22px rgb(16 30 43 / 0.45);
+
+  /* --- الخط ------------------------------------------------------------ */
+  --font-sans: var(--font-plex-ar), var(--font-plex-latin), "Segoe UI", Tahoma,
+    sans-serif;
+
+  /* --- الحركة ---------------------------------------------------------- */
+  --animate-breathe: breathe 1.7s ease-in-out infinite;
+  --animate-tick: tick 1.05s ease-in-out infinite;
+}
+
+/* أسماء مختصرة مطابقة لوثيقة الهوية، للاستخدام في CSS الخام */
+:root {
+  --ink: var(--color-ink);
+  --accent: var(--color-accent);
+  --surface: var(--color-surface);
+  --dark: var(--color-dark);
+  --muted: var(--color-muted);
+  --line: var(--color-line);
+}
+
+@keyframes breathe {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@keyframes tick {
+  0%,
+  100% {
+    transform: scaleY(0.4);
+    opacity: 0.35;
+  }
+  40% {
+    transform: scaleY(1);
+    opacity: 1;
+  }
+}
+
+/* ==========================================================================
+   الأساس
+   ========================================================================== */
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    background-color: var(--color-surface);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    font-size: 15px;
+    line-height: 1.75;
+    font-weight: 400;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  /* حلقة تركيز واحدة في كل النظام: حبر صلب، بلا توهّج ملوّن */
+  :focus-visible {
+    outline: 2px solid var(--color-ink);
+    outline-offset: 2px;
+    border-radius: 2px;
+  }
+
+  ::selection {
+    background-color: var(--color-ink);
+    color: var(--color-surface);
+  }
+
+  /* الأرقام في الجداول والقياسات تصطف عموديًا */
+  :where(table, .tabular) {
+    font-variant-numeric: tabular-nums;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.001ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.001ms !important;
+    }
+  }
+}
+
+/* ==========================================================================
+   أدوات النظام
+   ========================================================================== */
+
+@utility label-eyebrow {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  line-height: 1.4;
+  color: var(--color-muted);
+}
+
+/* تسطير الورق — خلفية دفتر خافتة، تُستخدم في الحالات الفارغة فقط */
+@utility paper-ruled {
+  background-image: repeating-linear-gradient(
+    to bottom,
+    transparent 0 33px,
+    rgb(16 30 43 / 0.028) 33px 34px
+  );
+}
