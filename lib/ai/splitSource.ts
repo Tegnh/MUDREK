@@ -90,6 +90,11 @@ export async function splitSource(
       });
 
       const rawText = response.text ?? "";
+      console.log("[رفع:٤-Gemini] ردّ", TEXT_MODEL, {
+        chars: rawText.length,
+        finishReason: response.candidates?.[0]?.finishReason,
+        head: rawText.slice(0, 160),
+      });
       return parseAndValidate(rawText, SplitSourceOutputSchema);
     }, "splitSource");
   } finally {

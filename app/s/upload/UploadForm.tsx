@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useEffect, useRef, useState } from "react";
+import { startTransition, useActionState, useEffect, useState } from "react";
 import { Card } from "@/components/ui/Card";
 import Input from "@/components/ui/Input";
 import Select from "@/components/ui/Select";
@@ -53,10 +53,23 @@ function uploadToSignedUrl(
     xhr.upload.onprogress = (e) => {
       if (e.lengthComputable) onProgress(e.loaded);
     };
-    xhr.onload = () =>
-      xhr.status >= 200 && xhr.status < 300
-        ? resolve()
-        : reject(new Error(`تعذّر رفع "${file.name}" (رمز ${xhr.status}).`));
+    // نصّ الردّ يُضمّ إلى الرسالة عمدًا: المخزن يشرح سبب الرفض في جسمه
+    // (InvalidKey، تجاوز الحجم، توقيع منتهٍ)، ورقمُ الحالة وحده كان يُخفي ذلك
+    // فيصير كل فشلٍ «رمز 400» لا أكثر.
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) return resolve();
+      let detail = "";
+      try {
+        const parsed = JSON.parse(xhr.responseText) as { message?: string; error?: string };
+        detail = parsed.message || parsed.error || "";
+      } catch {
+        detail = xhr.responseText.slice(0, 120);
+      }
+      console.error("[رفع] فشل PUT إلى المخزن", { file: file.name, status: xhr.status, detail });
+      reject(
+        new Error(`تعذّر رفع "${file.name}" (رمز ${xhr.status})${detail ? ` — ${detail}` : ""}.`),
+      );
+    };
     xhr.onerror = () => reject(new Error(`انقطع الاتصال أثناء رفع "${file.name}".`));
     xhr.onabort = () => reject(new Error("أُلغي الرفع."));
     xhr.send(body);
@@ -72,32 +85,16 @@ export function UploadForm() {
   const [phase, setPhase] = useState<Phase>("idle");
   const [sentBytes, setSentBytes] = useState(0);
   const [clientError, setClientError] = useState<string | null>(null);
-  const [uploaded, setUploaded] = useState<UploadedRef[]>([]);
-
-  const formRef = useRef<HTMLFormElement>(null);
 
   /**
-   * الخادم يحذف الملفات من المخزن بعد المعالجة، نجحت أو فشلت. فلو بقي
-   * uploaded مملوءًا بعد خطأ، لأرسلت محاولةُ الطالب التالية مساراتٍ لم تعد
-   * موجودة وفشلت فشلًا لا يفهمه. تفريغُه هنا يُعيد الضغطة التالية إلى رفعٍ
-   * كامل من جديد.
+   * الخادم يحذف الملفات من المخزن بعد المعالجة، نجحت أو فشلت — فأي محاولة
+   * تالية لا بدّ أن تبدأ برفعٍ كامل من جديد لا بمساراتٍ لم تعد موجودة.
    */
   useEffect(() => {
     if (!state.error) return;
     setPhase("idle");
-    setUploaded([]);
     setSentBytes(0);
   }, [state]);
-
-  /**
-   * الإرسال الثاني (المسارات وحدها) يُطلَق من هنا لا من نهاية دالة الرفع:
-   * الحقل المخفي يُقرأ من الـ DOM لحظة الإرسال، فلا بدّ أن يكون React قد
-   * أثبت `uploaded` فيه أولًا — والـ effect يجري بعد الإثبات، بخلاف نداءٍ
-   * يلي setState مباشرة.
-   */
-  useEffect(() => {
-    if (phase === "processing" && uploaded.length > 0) formRef.current?.requestSubmit();
-  }, [phase, uploaded]);
 
   const totalBytes = files.reduce((sum, f) => sum + f.size, 0);
   const pending = phase !== "idle" || processing;
@@ -105,7 +102,6 @@ export function UploadForm() {
 
   function onPick(list: FileList | null) {
     const picked = Array.from(list ?? []);
-    setUploaded([]);
     setSentBytes(0);
 
     if (picked.length > MAX_FILES) {
@@ -127,15 +123,35 @@ export function UploadForm() {
   }
 
   /**
-   * الرفع يسبق الإرسال: نرفع الملفات إلى المخزن أولًا، ثم نُرسل النموذج
-   * حاملًا مساراتها فقط. لذلك يُعترض submit هنا بدل تمريره إلى formAction.
+   * الرفع يسبق الإرسال: نرفع الملفات إلى المخزن أولًا، ثم نُنادي الإجراء
+   * حاملًا مساراتها. لذلك يُعترض submit هنا دائمًا بدل تمريره إلى formAction.
+   *
+   * الحقول تُقرأ في أول سطر، قبل أي تعطيل.
+   *
+   * كان النموذج يُعاد إرساله من الـ DOM (requestSubmit) بعد انتهاء الرفع،
+   * وحينها تكون الحقول قد صارت disabled لأن `pending` صار صحيحًا — والـ
+   * FormData يستثني كل عنصر معطّل. فكان title وsubject يصلان فارغَين إلى
+   * الخادم بعد رفعٍ ناجح تمامًا، فيردّ «أدخل اسمًا للمسار» ولا يُنشأ أي مسار.
+   * بناء الـ FormData هنا يدويًا يقطع اعتماد القيم على حالة الـ DOM لحظةَ
+   * الإرسال، ويُسقط معه الحقل المخفي ورحلة requestSubmit كلها.
    */
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
-    if (uploaded.length > 0) return; // الملفات مرفوعة سلفًا — دع النموذج يمضي
-
     e.preventDefault();
+
+    const formData = new FormData(e.currentTarget);
+    const title = String(formData.get("title") ?? "").trim();
+    const subject = String(formData.get("subject") ?? "").trim();
+
     if (files.length === 0) {
       setClientError("اختر ملفًا واحدًا على الأقل.");
+      return;
+    }
+    if (!title) {
+      setClientError("أدخل اسمًا للمسار.");
+      return;
+    }
+    if (!subject) {
+      setClientError("اختر المادة.");
       return;
     }
 
@@ -164,8 +180,9 @@ export function UploadForm() {
         refs.push({ path: tickets.tickets[i].path, name: file.name, type: file.type });
       }
 
-      setUploaded(refs);
+      formData.set("uploaded", JSON.stringify(refs));
       setPhase("processing");
+      startTransition(() => formAction(formData));
     } catch (err) {
       setPhase("idle");
       setClientError(err instanceof Error ? err.message : "تعذّر رفع الملفات.");
@@ -175,9 +192,7 @@ export function UploadForm() {
   const error = clientError ?? state.error;
 
   return (
-    <form ref={formRef} action={formAction} onSubmit={onSubmit} className="space-y-6">
-      <input type="hidden" name="uploaded" value={JSON.stringify(uploaded)} />
-
+    <form onSubmit={onSubmit} className="space-y-6">
       <Card padding="lg" className="space-y-6">
         <Input
           label="اسم المسار"

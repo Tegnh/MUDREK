@@ -43,8 +43,10 @@ export async function ingestUpload(
         throw new Error(`نوع ملف غير مدعوم: ${part.mimeType}`);
       }
       const out = await splitSource(part.bytes, part.mimeType as SupportedMimeType, part.name);
+      console.log("[رفع:٥-التقسيم] ✓", part.name, "→", out.sections.length, "قسمًا");
       return { usedFallback: false, sections: out.sections };
-    } catch {
+    } catch (e) {
+      console.error(`[رفع:٥-التقسيم] ✗ "${part.name}" سقط إلى التقسيم الاحتياطي بسبب:`, e);
       const baseName = part.name.replace(/\.[^.]+$/, "") || title;
       return { usedFallback: true, sections: fallbackSplitSource(baseName).sections };
     }

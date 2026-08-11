@@ -60,8 +60,15 @@ export async function createUploadTicketsAction(
   const tickets: UploadTicket[] = [];
 
   for (const f of files) {
-    const safeName = f.name.replace(/[^\p{L}\p{N}._-]+/gu, "_").slice(-80);
-    const path = `${profile.id}/${randomUUID()}-${safeName}`;
+    // المفتاح لا يحمل اسم الملف إطلاقًا: مُحقِّق المفاتيح في Supabase Storage
+    // يقبل ASCII وحده، فيردّ InvalidKey (400) على أي حرف عربي — وهو الاسم
+    // الغالب لملفات طلابنا. والفحص لا يقع عند إصدار الرابط بل عند الرفع
+    // نفسه، فالتذكرة تُصدَر بنجاح ثم يفشل الـ PUT بعدها بلا سبب ظاهر.
+    // الاسم الأصلي ليس ضائعًا: يعبر في UploadedRef.name، وهو ما يُعرض للطالب
+    // ويُمرَّر إلى Gemini. والملف يُحذف من المخزن بعد المعالجة مباشرة، فلا
+    // قيمة لاسمٍ مقروء في مفتاحٍ لا يعيش دقيقة.
+    const ext = f.name.toLowerCase().match(/\.[a-z0-9]{1,8}$/)?.[0] ?? "";
+    const path = `${profile.id}/${randomUUID()}${ext}`;
     const { data, error } = await admin.storage.from(BUCKET).createSignedUploadUrl(path);
     if (error || !data) {
       return { ok: false, error: error?.message ?? "تعذّر تجهيز الرفع. حاول مرة أخرى." };
@@ -89,6 +96,14 @@ export async function ingestUploadedAction(
   const title = String(formData.get("title") ?? "").trim();
   const subject = String(formData.get("subject") ?? "").trim();
 
+  // أثر خفيف يغطّي المسار كله: بدونه كان فشلُ أيّ حلقة يظهر للطالب سطرًا
+  // أحمر واحدًا بلا ما يدلّ على موضعه في السلسلة.
+  console.log("[رفع:١-النموذج]", {
+    حقول: [...formData.keys()],
+    عنوان: Boolean(title),
+    مادة: Boolean(subject),
+  });
+
   let refs: UploadedRef[];
   try {
     refs = JSON.parse(String(formData.get("uploaded") ?? "[]")) as UploadedRef[];
@@ -96,8 +111,14 @@ export async function ingestUploadedAction(
     return { error: "تعذّر قراءة بيانات الملفات المرفوعة." };
   }
 
-  if (!title) return { error: "أدخل اسمًا للمسار." };
-  if (!subject) return { error: "اختر المادة." };
+  if (!title) {
+    console.error("[رفع:٢-تحقق] ✗ لم يصل حقل title من النموذج.");
+    return { error: "أدخل اسمًا للمسار." };
+  }
+  if (!subject) {
+    console.error("[رفع:٢-تحقق] ✗ لم يصل حقل subject من النموذج.");
+    return { error: "اختر المادة." };
+  }
   if (!Array.isArray(refs) || refs.length === 0) return { error: "اختر ملفًا واحدًا على الأقل." };
   if (refs.length > MAX_FILES) {
     return { error: `الحد الأقصى ${MAX_FILES} ملفات في المرة الواحدة.` };
@@ -119,27 +140,38 @@ export async function ingestUploadedAction(
       refs.map(async (ref) => {
         const { data, error } = await admin.storage.from(BUCKET).download(ref.path);
         if (error || !data) {
+          console.error("[رفع:٣-المخزن] ✗ تعذّر تنزيل", ref.path, error);
           throw new Error(`تعذّر قراءة الملف "${ref.name}" من المخزن.`);
         }
+        const bytes = Buffer.from(await data.arrayBuffer());
+        console.log("[رفع:٣-المخزن] ✓", ref.path, bytes.byteLength, "بايت");
         return {
           name: ref.name,
           mimeType: resolveMimeType(ref.name, ref.type || data.type),
-          bytes: Buffer.from(await data.arrayBuffer()),
+          bytes,
         };
       }),
     );
 
     const { file, usedFallback } = await ingestUpload(parts, title, subject);
+    console.log("[رفع:٦-الحفظ] ✓", {
+      fileId: file.id,
+      sections: file.sectionIds.length,
+      usedFallback,
+      pid: process.pid,
+    });
 
     await logActivity({ kind: "source_uploaded", fileRef: file.id, label: title });
     revalidatePath("/s", "layout");
 
     destination = `/s/course/${file.id}${usedFallback ? "?fallback=1" : ""}`;
   } catch (e) {
+    console.error("[رفع:✗] انقطعت السلسلة:", e);
     return { error: e instanceof Error ? e.message : "تعذّر معالجة الملفات. حاول مرة أخرى." };
   } finally {
     await admin.storage.from(BUCKET).remove(paths);
   }
 
+  console.log("[رفع:٧-تحويل] →", destination);
   redirect(destination);
 }
