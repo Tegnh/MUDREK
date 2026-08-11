@@ -9,6 +9,17 @@ export const metadata: Metadata = {
   },
   description:
     "المعلم يرفع الاختبار، الذكاء الاصطناعي يشخّص كل طالب على حدة، والطالب يتلقى تمرينًا موجّهًا لفجوته تحديدًا — لا لدرجته فقط.",
+  icons: {
+    icon: [
+      { url: "/icon.svg", type: "image/svg+xml" },
+      { url: "/favicon.ico", sizes: "any" },
+      { url: "/icon.png", type: "image/png" },
+    ],
+    shortcut: "/favicon.ico",
+    apple: [
+      { url: "/apple-icon.png", sizes: "180x180", type: "image/png" },
+    ],
+  },
 };
 
 export const viewport: Viewport = {

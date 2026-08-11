@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <style>
+    .bar { fill: #101e2b; }
+    .gap { fill: #f0722c; }
+    @media (prefers-color-scheme: dark) {
+      .bar { fill: #faf7f2; }
+    }
+  </style>
+  <rect class="bar" x="14" y="12.5" width="38" height="9" rx="4.5" />
+  <rect class="bar" x="30" y="27.5" width="22" height="9" rx="4.5" />
+  <rect class="gap" x="14" y="27.5" width="11" height="9" rx="4.5" />
+  <rect class="bar" x="14" y="42.5" width="38" height="9" rx="4.5" />
+</svg>
