@@ -1,9 +1,16 @@
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { getFileRaw, getSectionRaw, sectionWithStatus, sectionsWithStatus } from "@/lib/data/store";
+import { ensureSectionQuiz, warmSectionQuiz } from "@/lib/data/quiz-provider";
 import { LessonRunner } from "./LessonRunner";
 
 type Params = Promise<{ id: string }>;
+
+/**
+ * توليد الاختبار انتقل من لحظة الرفع إلى هنا، فصار هذا المسار هو الذي
+ * ينادي النموذج. الافتراضي على Vercel أقصر من نداءٍ واحد.
+ */
+export const maxDuration = 60;
 
 export async function generateMetadata({ params }: { params: Params }): Promise<Metadata> {
   const { id } = await params;
@@ -16,7 +23,6 @@ export default async function LessonPage({ params }: { params: Params }) {
 
   const section = getSectionRaw(id);
   if (!section) notFound();
-  if (!section.quiz) notFound();
 
   const file = getFileRaw(section.fileId);
   if (!file) notFound();
@@ -27,9 +33,17 @@ export default async function LessonPage({ params }: { params: Params }) {
     notFound();
   }
 
+  // أوّل فتحٍ للقسم يُولّد اختباره ثم يخزّنه؛ ما بعده قراءةٌ فورية.
+  // البوابة أعلاه تسبقه عمدًا: لا يُنفَق نداء نموذج على قسم مقفل.
+  const quiz = await ensureSectionQuiz(id);
+
   const siblings = sectionsWithStatus(file.id);
   const currentPos = siblings.findIndex((s) => s.id === id);
   const next = siblings[currentPos + 1] ?? null;
+
+  // تسخين القسم التالي بلا انتظار: الطالب أمامه دقائق في اختبار هذا القسم،
+  // وهي مهلة تكفي لتوليد التالي — فيصل إليه وقد جهز.
+  if (next) warmSectionQuiz(next.id);
 
   return (
     <LessonRunner
@@ -38,7 +52,7 @@ export default async function LessonPage({ params }: { params: Params }) {
       sectionId={section.id}
       sectionTitle={section.title}
       contentMd={section.content_md}
-      quiz={section.quiz}
+      quiz={quiz}
       nextSection={next ? { id: next.id, title: next.title } : null}
     />
   );

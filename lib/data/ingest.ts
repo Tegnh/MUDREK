@@ -1,24 +1,32 @@
-import { splitSource } from "@/lib/ai/splitSource";
-import { generateQuiz } from "@/lib/ai/generateQuiz";
-import { fallbackGenerateQuiz, fallbackSplitSource } from "@/lib/ai/fallback";
-import { misconceptionCatalogRecord } from "./misconceptions";
-import { addFile, type NewSectionInput } from "./store";
+import { splitSource, type SupportedMimeType } from "@/lib/ai/splitSource";
+import { fallbackSplitSource } from "@/lib/ai/fallback";
+import { mapWithConcurrency } from "@/lib/ai/utils";
+import { addFile } from "./store";
 import type { SourceFile } from "./types";
 
 /**
- * يُنسِّق مسار الرفع كاملًا: splitSource لكل ملف، ثم generateQuiz لكل قسم
- * ناتج، مع تراجع محلي فوري إذا فشل أيّ استدعاء (لا مفتاح GEMINI_API_KEY
- * غالبًا في هذه البيئة) حتى تبقى الصفحة قابلة للتجربة من أول تشغيل.
+ * يُنسِّق مسار الرفع: splitSource لكل ملف، مع تراجع محلي فوري إذا فشل النداء
+ * (لا مفتاح GEMINI_API_KEY غالبًا في هذه البيئة) حتى تبقى الصفحة قابلة
+ * للتجربة من أول تشغيل.
+ *
+ * ما لا يفعله هنا عمدًا: توليد الاختبارات. كان الرفع يُنادي generateQuiz لكل
+ * قسم ناتج بالتسلسل — حتى عشرين نداءً × ~٢٠ ثانية — فيقف الطالب أمام شاشة
+ * تحميل خمس دقائق قبل أن يرى شيئًا، ثم يفتح قسمًا أو قسمين ويترك الباقي.
+ * صار الاختبار يُولَّد عند فتح القسم فعلًا (lib/data/quiz-provider.ts):
+ * الرفع يقتصر على التقسيم، والعمل المهدور يختفي.
  */
 
-export type UploadFilePart = { name: string; mimeType: string; base64: string };
+export type UploadFilePart = { name: string; mimeType: string; bytes: Buffer };
 
-const SUPPORTED_MIME_TYPES = new Set([
+const SUPPORTED_MIME_TYPES = new Set<string>([
   "application/pdf",
   "text/plain",
   "text/markdown",
   "application/vnd.openxmlformats-officedocument.presentationml.presentation",
 ]);
+
+/** الملفات مستقلّة عن بعضها تمامًا، والحدّ يحمي حصّة الطلبات في الدقيقة. */
+const SPLIT_CONCURRENCY = 3;
 
 export type IngestResult = { file: SourceFile; usedFallback: boolean };
 
@@ -29,41 +37,30 @@ export async function ingestUpload(
 ): Promise<IngestResult> {
   if (parts.length === 0) throw new Error("لم يُرفَع أي ملف.");
 
-  let usedFallback = false;
-  const rawSections: { title: string; content_md: string; key_concepts: string[] }[] = [];
-
-  for (const part of parts) {
+  const perFile = await mapWithConcurrency(parts, SPLIT_CONCURRENCY, async (part) => {
     try {
       if (!SUPPORTED_MIME_TYPES.has(part.mimeType)) {
         throw new Error(`نوع ملف غير مدعوم: ${part.mimeType}`);
       }
-      const out = await splitSource(part.base64, part.mimeType as Parameters<typeof splitSource>[1]);
-      for (const s of out.sections) {
-        rawSections.push({ title: s.title, content_md: s.content_md, key_concepts: s.key_concepts });
-      }
+      const out = await splitSource(part.bytes, part.mimeType as SupportedMimeType, part.name);
+      return { usedFallback: false, sections: out.sections };
     } catch {
-      usedFallback = true;
       const baseName = part.name.replace(/\.[^.]+$/, "") || title;
-      const out = fallbackSplitSource(baseName);
-      for (const s of out.sections) {
-        rawSections.push({ title: s.title, content_md: s.content_md, key_concepts: s.key_concepts });
-      }
+      return { usedFallback: true, sections: fallbackSplitSource(baseName).sections };
     }
-  }
+  });
 
-  const catalog = misconceptionCatalogRecord();
-  const sections: NewSectionInput[] = [];
-
-  for (const rs of rawSections) {
-    try {
-      const quizOut = await generateQuiz(rs.content_md, 4, catalog);
-      sections.push({ ...rs, quiz: quizOut.questions });
-    } catch {
-      usedFallback = true;
-      const quizOut = fallbackGenerateQuiz(rs.title, rs.key_concepts);
-      sections.push({ ...rs, quiz: quizOut.questions });
-    }
-  }
+  const usedFallback = perFile.some((r) => r.usedFallback);
+  const sections = perFile.flatMap((r) =>
+    r.sections.map((s) => ({
+      title: s.title,
+      content_md: s.content_md,
+      key_concepts: s.key_concepts,
+      // null لا مصفوفة فارغة: الفرق بين «لم يُولَّد بعد» و«اختبار بلا أسئلة»
+      // هو ما يقرأه quiz-provider ليقرّر التوليد عند الفتح.
+      quiz: null,
+    })),
+  );
 
   const file = addFile(title, subject, sections);
   return { file, usedFallback };

@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { fileCompletionPct, getFileRaw, sectionsWithStatus } from "@/lib/data/store";
+import { warmSectionQuiz } from "@/lib/data/quiz-provider";
 import { MASTERY_THRESHOLD } from "@/lib/data/types";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
@@ -34,6 +35,11 @@ export default async function CoursePage({
   const sections = sectionsWithStatus(id);
   const completion = fileCompletionPct(id);
   const masteredCount = sections.filter((s) => s.status === "mastered").length;
+
+  // القسم الذي سيضغطه الطالب بعد قليل هو أوّل قسم متاح. توليد اختباره يبدأ
+  // الآن — وهو يقرأ قائمة الأقسام — بدل أن يبدأ بعد الضغطة فينتظره.
+  const upNext = sections.find((s) => s.status === "available" || s.status === "in_progress");
+  if (upNext) warmSectionQuiz(upNext.id);
 
   return (
     <div className="space-y-7">

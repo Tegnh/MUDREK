@@ -235,8 +235,22 @@ export type NewSectionInput = {
   title: string;
   content_md: string;
   key_concepts: string[];
-  quiz: QuizQuestion[];
+  /** null = لم يُولَّد بعد؛ يُملأ عند أوّل فتح للقسم. */
+  quiz: QuizQuestion[] | null;
 };
+
+/**
+ * يُثبّت اختبارًا وُلِّد كسولًا على قسمه.
+ *
+ * يُعيد false إن اختفى القسم بين لحظة بدء التوليد ولحظة انتهائه — لا يحدث في
+ * المخزن الحالي، لكنه يصير واردًا حين تحلّ القاعدة محلّه.
+ */
+export function setSectionQuiz(sectionId: string, quiz: QuizQuestion[]): boolean {
+  const section = getSectionRaw(sectionId);
+  if (!section) return false;
+  section.quiz = quiz;
+  return true;
+}
 
 export function addFile(title: string, subject: string, sections: NewSectionInput[]): SourceFile {
   const fileId = nextId("file");

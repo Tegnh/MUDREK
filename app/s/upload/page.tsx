@@ -3,6 +3,12 @@ import { UploadForm } from "./UploadForm";
 
 export const metadata: Metadata = { title: "رفع مصدر" };
 
+/**
+ * الـ Server Action يُنفَّذ في دالة هذا المسار، فمدّته هي مدّته. الافتراضي على
+ * Vercel أقصر بكثير من تقسيم ملفٍ كبير، و٦٠ ثانية هو سقف خطة Hobby.
+ */
+export const maxDuration = 60;
+
 export default function UploadPage() {
   return (
     <div className="space-y-8">

@@ -1,16 +1,17 @@
 /**
  * splitSource — تقسيم ملف مصدر دراسي إلى أقسام منطقية
  *
- * يقبل ملفًا (PDF أو نص أو شرائح) مُرمَّزًا بـ Base64 ويُعيد
+ * يقبل ملفًا (PDF أو نص أو شرائح) بهيئة بايتات ويُعيد
  * قائمة أقسام منظّمة مع عناوين ومفاهيم رئيسية جاهزة للدراسة.
  */
 
 import { getGenAIClient, TEXT_MODEL, BASE_CONFIG } from "./client";
 import { parseAndValidate, withOneRetry } from "./utils";
+import { buildFilePart } from "./filePart";
 import { SplitSourceOutputSchema, type SplitSourceOutput } from "./schemas";
 
 /** الأنواع المدعومة */
-type SupportedMimeType =
+export type SupportedMimeType =
   | "application/pdf"
   | "text/plain"
   | "text/markdown"
@@ -55,41 +56,43 @@ const SPLIT_PROMPT = `
 /**
  * يُقسِّم ملف مصدر دراسي إلى أقسام منطقية.
  *
- * @param fileBase64 - محتوى الملف مُرمَّزًا بـ Base64
- * @param mimeType  - نوع MIME للملف
+ * @param bytes    - محتوى الملف الخام
+ * @param mimeType - نوع MIME للملف
+ * @param fileName - اسم الملف، للرسائل وللعرض في Files API
  * @returns قائمة الأقسام المنظَّمة
  */
 export async function splitSource(
-  fileBase64: string,
-  mimeType: SupportedMimeType
+  bytes: Buffer,
+  mimeType: SupportedMimeType,
+  fileName = "مصدر"
 ): Promise<SplitSourceOutput> {
-  return withOneRetry(async () => {
-    const client = getGenAIClient();
+  // يُبنى الجزء مرّة واحدة خارج withOneRetry: رفعُ ملفٍ كبير مرّتين لأن
+  // النموذج ردّ 429 في المحاولة الأولى هدرٌ خالص — الملف المرفوع يبقى صالحًا.
+  const { part, cleanup } = await buildFilePart({ name: fileName, mimeType, bytes });
 
-    const response = await client.models.generateContent({
-      model: TEXT_MODEL,
-      contents: [
-        {
-          role: "user",
-          parts: [
-            {
-              inlineData: {
-                mimeType,
-                data: fileBase64,
-              },
-            },
-            { text: SPLIT_PROMPT },
-          ],
+  try {
+    return await withOneRetry(async () => {
+      const client = getGenAIClient();
+
+      const response = await client.models.generateContent({
+        model: TEXT_MODEL,
+        contents: [
+          {
+            role: "user",
+            parts: [part, { text: SPLIT_PROMPT }],
+          },
+        ],
+        config: {
+          ...BASE_CONFIG,
+          temperature: 0.2,
+          maxOutputTokens: 8192,
         },
-      ],
-      config: {
-        ...BASE_CONFIG,
-        temperature: 0.2,
-        maxOutputTokens: 8192,
-      },
-    });
+      });
 
-    const rawText = response.text ?? "";
-    return parseAndValidate(rawText, SplitSourceOutputSchema);
-  }, "splitSource");
+      const rawText = response.text ?? "";
+      return parseAndValidate(rawText, SplitSourceOutputSchema);
+    }, "splitSource");
+  } finally {
+    await cleanup();
+  }
 }
